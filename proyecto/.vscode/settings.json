@@ -1,0 +1,8 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "code-runner.executorMap": {
+    "cpp": "bash \"$workspaceRoot/ejecutar.sh\""
+  },
+  "code-runner.saveAllFilesBeforeRun": true
+}
