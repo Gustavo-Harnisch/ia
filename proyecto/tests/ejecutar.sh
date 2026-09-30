@@ -6,6 +6,6 @@ trap 'rm -rf -- "$pruebas_dir"' EXIT
 g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -pthread \
     -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I"$proyecto_dir/src" "$proyecto_dir/tests/evolutivo_test.cpp" \
-    "$proyecto_dir/src/"{Grafo,MST,Steiner,Heuristica,Evolutivo}.cpp \
+    "$proyecto_dir/src/"{Grafo,MST,Steiner,Heuristica,Evolutivo,Paralelismo,IntercambioCaminos,BusquedaLocal}.cpp \
     -o "$pruebas_dir/evolutivo_test"
 "$pruebas_dir/evolutivo_test"

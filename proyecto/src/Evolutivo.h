@@ -72,7 +72,8 @@ ResultadoEvolutivo ejecutarEvolutivoElitista(
     const ResultadoSteiner& solucionInicial,
     int maxGeneraciones = GENERACIONES_PREDETERMINADAS,
     std::uint32_t semilla = 42,
-    const ObservadorMejora& alMejorar = {}
+    const ObservadorMejora& alMejorar = {},
+    unsigned numeroHilos = 0 // 0: automático; 1: secuencial.
 );
 
 

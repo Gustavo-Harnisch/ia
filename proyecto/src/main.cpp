@@ -12,6 +12,7 @@
 #include "Steiner.h"
 #include "Heuristica.h"
 #include "BusquedaLocal.h"
+#include "IntercambioCaminos.h"
 #include "Evolutivo.h"
 #include "Grafica.h"
 
@@ -23,10 +24,10 @@ int main(int argc, char* argv[])
 try
 {
 
-    if (argc > 4) throw invalid_argument("Uso: proyecto [archivo] [generaciones] [semilla]");
+    if (argc > 5) throw invalid_argument("Uso: proyecto [archivo] [generaciones] [semilla] [hilos]");
     auto numero = [](const string& texto, unsigned long long maximo) {
         if (texto.empty() || texto.find_first_not_of("0123456789") != string::npos) {
-            throw invalid_argument("Generaciones y semilla deben ser números enteros no negativos.");
+            throw invalid_argument("Generaciones, semilla e hilos deben ser números enteros no negativos.");
         }
         const auto valor = stoull(texto);
         if (valor > maximo) throw invalid_argument("Parámetro numérico fuera de rango.");
@@ -35,6 +36,8 @@ try
     const int generaciones = argc > 2 ? static_cast<int>(numero(argv[2], numeric_limits<int>::max())) : 0;
     if (argc > 2 && generaciones == 0) throw invalid_argument("Las generaciones deben ser positivas.");
     const uint32_t semilla = argc > 3 ? static_cast<uint32_t>(numero(argv[3], numeric_limits<uint32_t>::max())) : 42;
+
+    const unsigned hilos = argc > 4 ? static_cast<unsigned>(numero(argv[4], numeric_limits<unsigned>::max())) : 0;
 
     const filesystem::path archivo = argc > 1
         ? filesystem::path(argv[1])
@@ -118,7 +121,7 @@ try
 
 
     ResultadoSteiner heuristica =
-        mejorarPorCaminos(grafo).solucion;
+        mejorarPorCaminos(grafo, 0, hilos).solucion;
 
 
     cout << "Costo heurística: "
@@ -146,7 +149,17 @@ try
 
 
     // ============================
-    // 6. Evolutivo elitista
+    // 6. Intercambio de caminos
+    // ============================
+
+    cout << "\nIntercambio de caminos\n";
+    const auto caminos = mejorarIntercambioCaminos(grafo, local, 10, hilos);
+    cout << "Costo intercambio: " << caminos.solucion.costo
+         << " | Mejoras: " << caminos.mejorasAceptadas
+         << " | Caminos evaluados: " << caminos.caminosEvaluados << endl;
+
+    // ============================
+    // 7. Evolutivo elitista
     // ============================
 
 
@@ -180,8 +193,8 @@ try
     };
     cout << "Imágenes de esta ejecución: " << carpeta << endl;
     ResultadoEvolutivo evolucion = ejecutarEvolutivoElitista(
-        grafo, local, argc > 2 ? generaciones : GENERACIONES_PREDETERMINADAS,
-        semilla, guardarMejor);
+        grafo, caminos.solucion, argc > 2 ? generaciones : GENERACIONES_PREDETERMINADAS,
+        semilla, guardarMejor, hilos);
 
 
     cout << "\nResultado final evolutivo\n";

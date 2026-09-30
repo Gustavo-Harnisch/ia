@@ -212,7 +212,7 @@ El código anterior copiaba el padre en `mutarSolucion`: aumentar generaciones r
 - **Selección:** torneo para elegir padres; sobreviven las 14 mejores soluciones distintas y hasta dos alternativas aleatorias. Las firmas incluyen las aristas y sus costos para eliminar clones, sin confundir árboles diferentes de igual costo.
 - **Diversidad adicional:** cada diez generaciones se construye una solución desde otro terminal de inicio.
 - **Validación y elitismo:** cada descendiente se valida antes de entrar a la población; se conserva el mejor costo y se devuelve su árbol completo. El historial permite comprobar que el mejor costo nunca aumenta.
-- **Paralelismo reproducible:** hasta cuatro tareas simultáneas, cada una con su propio generador aleatorio. La semilla predeterminada es 42.
+- **Paralelismo reproducible:** trabajadores persistentes configurables, cada tarea con su propio generador aleatorio. La semilla predeterminada es 42.
 
 Prueba con `e18.stp`, 100 generaciones y semilla 42: **597 → 589**, solución válida, 1610 candidatos evaluados, 1600 descendientes diferentes de sus padres, 792 cruces y población final de 16 árboles distintos. El evolutivo tardó aproximadamente 1,80 segundos, sin contar las etapas anteriores. Con **1000 generaciones y semilla 42**, el costo bajó a **583**, con solución válida, 16100 candidatos evaluados, 16000 descendientes diferentes, 7992 cruces y aproximadamente 16,12 segundos de evolutivo. La última mejora ocurrió en la generación 247. No se garantiza mejorar en cada generación ni alcanzar el óptimo de referencia 564; puede haber períodos sin mejora.
 
@@ -251,7 +251,7 @@ bash ejecutar.sh datos/grafo.txt 20 42
 
 Se requieren `g++` y Graphviz (`dot`). El script elimina su carpeta temporal al terminar. La entrada predeterminada se resuelve desde la ubicación del proyecto, independientemente de la carpeta de la terminal.
 
-Los argumentos opcionales del ejecutable son `archivo generaciones semilla`. Se conservó el límite de **1.000.000 de generaciones** que estaba configurado en `Evolutivo.h`; Run Code sin argumentos usa ese límite y puede tardar bastante. Para una prueba breve, usar el comando de 100 generaciones anterior. El tercer y cuarto argumento de `ejecutarEvolutivoElitista` también permiten elegir límite y semilla desde C++.
+Los argumentos opcionales del ejecutable son `archivo generaciones semilla hilos`. Se conservó el límite de **1.000.000 de generaciones** que estaba configurado en `Evolutivo.h`; Run Code sin argumentos usa ese límite y puede tardar bastante. Para una prueba breve, usar el comando de 100 generaciones anterior. El tercer y cuarto argumento de `ejecutarEvolutivoElitista` también permiten elegir límite y semilla desde C++.
 
 CMake también está disponible al trabajar en un sistema de archivos local o directamente en el servidor. Si se trasladó el proyecto, usar una carpeta de compilación nueva para evitar cachés con rutas anteriores:
 
@@ -296,3 +296,94 @@ Graphviz calcula las posiciones para visualizar el árbol: la optimización elig
 Para verlo mientras corre en el servidor, abrir la carpeta `salidas` desde SFTP o VS Code Remote SSH, entrar a la carpeta indicada en la terminal y abrir `mejor.png`. Volver a abrir o recargar la vista después de una actualización; la actualización automática depende del visor. Usar `mejor.svg` para ampliar árboles grandes.
 
 Una ejecución que ya estaba corriendo con un binario anterior no incorpora esta función. Hace falta iniciar una nueva ejecución con el código actualizado; el programa no recupera la solución que el proceso anterior conserva solamente en memoria.
+
+
+## Ejecución con hilos reutilizables
+
+`Paralelismo.h/.cpp` contiene un ejecutor reutilizable con C++17: crea los trabajadores
+una vez por etapa y reparte las tareas entre ellos. Espera a que terminen antes de
+continuar y propaga sus excepciones al llamador. La heurística evalúa inicios en
+paralelo; el evolutivo paraleliza construcción, validación y firma de sus 16 hijos
+por generación. El grafo y los padres se comparten en modo de lectura; cada tarea
+escribe su propio resultado. La selección, los avisos y las imágenes conservan
+su orden. La búsqueda local sigue siendo secuencial porque acepta cambios que
+modifican los candidatos posteriores.
+
+Desde la carpeta `proyecto`:
+
+```bash
+bash ejecutar.sh datos/e18.stp 1000 42 8  # Solicitar 8 hilos
+bash ejecutar.sh datos/e18.stp 1000 42 1  # Comparar con ejecución secuencial
+bash ejecutar.sh datos/e18.stp 1000 42 0  # Automático (también si se omite)
+```
+
+El modo automático usa la concurrencia que informa el equipo, limitada a las
+tareas útiles: como máximo 16 trabajadores en el evolutivo y tantos como inicios
+en la heurística. Un hilo ejecuta las tareas directamente. No hay garantía de
+aceleración en grafos pequeños ni de crecimiento lineal con más hilos.
+La semilla y el orden de selección no dependen del orden de ejecución de los
+trabajadores. Las pruebas comparan uno y cuatro hilos y verifican reutilización,
+propagación de errores y recuperación del ejecutor.
+
+Medición puntual con E18, compilación `-O2`, semilla 42 y 100 generaciones,
+partiendo directamente de la heurística (sin búsqueda local ni gráficos):
+
+| Etapa | 1 hilo | 4 hilos |
+| --- | ---: | ---: |
+| Heurística, 417 inicios | 1,266 s | 0,419 s |
+| Evolutivo, 100 generaciones | 2,903 s | 1,302 s |
+
+Ambas ejecuciones produjeron costo heurístico 628 y costo final válido 591,
+con las mismas generaciones de mejora. Es una medición local, no una garantía
+de rendimiento en otros equipos ni del tiempo total con búsqueda local e imágenes.
+
+## Intercambio de caminos
+
+El módulo `src/IntercambioCaminos.h/.cpp` implementa una búsqueda local por
+intercambio de caminos. Identifica tramos entre terminales o nodos de grado
+distinto de dos, cuyos interiores son nodos opcionales de grado dos. Retira
+un tramo y conecta las dos componentes restantes mediante Dijkstra con varios
+orígenes sobre el grafo original. La ruta puede incorporar varios nodos nuevos
+o volver a utilizar interiores retirados. Los costos originales nunca cambian.
+
+Cada pasada evalúa los caminos sobre la misma solución, en lotes paralelos,
+y acepta únicamente la mejor reducción estricta. Después reconstruye, poda y
+valida el árbol. Los empates se resuelven en orden estable, independientemente
+de los hilos. Si termina una pasada sin mejora, se ha agotado este vecindario;
+no significa haber encontrado el óptimo global.
+
+```cpp
+#include "IntercambioCaminos.h"
+auto caminos = mejorarIntercambioCaminos(grafo, local, 10, 4);
+// caminos.solucion contiene el árbol; los otros campos informan pasadas,
+// caminos evaluados, mejoras aceptadas e historial de costos.
+```
+
+El tercer argumento limita las pasadas (0 continúa hasta que no haya mejoras).
+El cuarto selecciona hilos (0 automático, 1 secuencial). La entrada se conserva;
+se rechazan soluciones inválidas, límites negativos y aristas de costo negativo.
+
+`main.cpp` ejecuta hasta 10 pasadas después de la búsqueda local y entrega su
+resultado al evolutivo. Además, el evolutivo aplica una pasada al candidato de
+menor costo cada 50 generaciones. Una mejora se incorpora a la selección y pasa
+por el aviso habitual que actualiza las imágenes. El contador de soluciones
+evaluadas incluye ese árbol adicional cuando se incorpora; los caminos
+explorados son una métrica separada dentro del resultado del nuevo módulo.
+Esta intensificación añade trabajo por generación y puede mejorar la calidad;
+no garantiza un costo concreto ni una ejecución total más rápida.
+
+`bash tests/ejecutar.sh` verifica un caso donde la búsqueda de un nodo se queda
+en costo 10 y el intercambio baja a 3 introduciendo dos nodos juntos. También
+comprueba reconexiones entre distintos puntos de las componentes, conservación
+de ramas terminales, eliminación de interiores antiguos, empates, uno y varios
+hilos, límites, un terminal, costos cero y de 64 bits, y rechazo de entradas
+inválidas. Las pruebas del evolutivo cubren la intensificación periódica.
+
+Validación de integración con E18, 100 generaciones, semilla 42 y 4 hilos:
+la búsqueda local entregó costo 597 y el intercambio inicial no encontró una
+mejora en sus 499 caminos. Durante el evolutivo se incorporó una solución adicional
+por intercambio; el resultado final fue válido, de costo 592. Esta medición no
+demuestra superioridad sobre todas las ejecuciones anteriores: al incorporar un
+nuevo individuo cambia la trayectoria de selección aun conservando la semilla.
+La compilación Release y las pruebas con AddressSanitizer/UndefinedBehaviorSanitizer
+terminaron correctamente.
