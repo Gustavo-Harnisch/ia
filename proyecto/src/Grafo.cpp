@@ -30,6 +30,7 @@ void Grafo::agregarArista(int origen, int destino, int costo) {
     // Grafo no dirigido: la conexión se registra en ambos sentidos.
     adyacencia_[origen].push_back({destino, costo});
     adyacencia_[destino].push_back({origen, costo});
+    conexiones_.push_back({origen, destino, costo});
 }
 
 void Grafo::agregarTerminal(int nodo) {
@@ -47,6 +48,10 @@ const vector<Arista>& Grafo::vecinos(int nodo) const {
 
 const vector<int>& Grafo::terminales() const {
     return terminales_;
+}
+
+const vector<ConexionGrafo>& Grafo::conexiones() const {
+    return conexiones_;
 }
 
 vector<bool> recorrer(const Grafo& grafo, int inicio) {

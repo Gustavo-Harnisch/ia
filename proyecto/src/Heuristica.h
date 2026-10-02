@@ -14,6 +14,6 @@ ResultadoSteiner construirPorCaminos(const Grafo& grafo, int terminalInicial);
 
 // Prueba distintos terminales de inicio y conserva el menor costo.
 // maxInicios = 0 significa probar todos; un valor positivo limita los intentos.
-ResultadoHeuristica mejorarPorCaminos(const Grafo& grafo, int maxInicios = 0);
+ResultadoHeuristica mejorarPorCaminos(const Grafo& grafo, int maxInicios = 0, unsigned numeroHilos = 0);
 
 #endif

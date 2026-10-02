@@ -1,4 +1,5 @@
 #include "Heuristica.h"
+#include "Paralelismo.h"
 
 #include <algorithm>
 #include <functional>
@@ -82,7 +83,7 @@ ResultadoSteiner construirPorCaminos(const Grafo& grafo, int terminalInicial) {
     return resultado;
 }
 
-ResultadoHeuristica mejorarPorCaminos(const Grafo& grafo, int maxInicios) {
+ResultadoHeuristica mejorarPorCaminos(const Grafo& grafo, int maxInicios, unsigned numeroHilos) {
     if (grafo.terminales().empty() || maxInicios < 0) {
         throw invalid_argument("Se necesita al menos un terminal y un límite no negativo.");
     }
@@ -90,14 +91,22 @@ ResultadoHeuristica mejorarPorCaminos(const Grafo& grafo, int maxInicios) {
     const int intentos = maxInicios == 0 ? total : min(total, maxInicios);
     optional<ResultadoHeuristica> mejor;
 
-    for (int i = 0; i < intentos; ++i) {
-        const int inicio = grafo.terminales()[i];
-        ResultadoSteiner candidata = construirPorCaminos(grafo, inicio);
-        if (!validarSteiner(grafo, candidata)) {
-            throw runtime_error("La heurística generó una solución inválida.");
-        }
-        if (!mejor || candidata.costo < mejor->solucion.costo) {
-            mejor = ResultadoHeuristica{move(candidata), inicio, intentos};
+    const unsigned hilos = resolverHilos(numeroHilos, intentos);
+    EjecutorParalelo ejecutor(hilos);
+    // Lotes acotados evitan conservar un árbol por cada terminal del grafo.
+    for (int lote = 0; lote < intentos; lote += static_cast<int>(hilos)) {
+        const int cantidad = min(static_cast<int>(hilos), intentos - lote);
+        vector<optional<ResultadoSteiner>> candidatas(cantidad);
+        ejecutor.ejecutar(cantidad, [&](size_t i) {
+            candidatas[i] = construirPorCaminos(grafo, grafo.terminales()[lote + i]);
+            if (!validarSteiner(grafo, *candidatas[i])) {
+                throw runtime_error("La heurística generó una solución inválida.");
+            }
+        });
+        for (int i = 0; i < cantidad; ++i) {
+            if (!mejor || candidatas[i]->costo < mejor->solucion.costo) {
+                mejor = ResultadoHeuristica{move(*candidatas[i]), grafo.terminales()[lote + i], intentos};
+            }
         }
     }
     return move(*mejor);

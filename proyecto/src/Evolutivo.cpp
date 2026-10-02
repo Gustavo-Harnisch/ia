@@ -1,9 +1,11 @@
 #include "Evolutivo.h"
 #include "Heuristica.h"
+#include "Paralelismo.h"
+#include "IntercambioCaminos.h"
 
 #include <algorithm>
 #include <chrono>
-#include <future>
+#include <optional>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -177,14 +179,16 @@ void monitorEvolutivo(EstadoEvolutivo& estado) {
 
 ResultadoEvolutivo ejecutarEvolutivoElitista(
     const Grafo& grafo, const ResultadoSteiner& solucionInicial,
-    int maxGeneraciones, uint32_t semilla, const ObservadorMejora& alMejorar) {
+    int maxGeneraciones, uint32_t semilla, const ObservadorMejora& alMejorar,
+    unsigned numeroHilos) {
     if (maxGeneraciones <= 0) throw invalid_argument("El número de generaciones debe ser positivo.");
     if (!validarSteiner(grafo, solucionInicial)) throw invalid_argument("La solución inicial no es válida.");
     const auto conexiones = conexionesDel(grafo);
     const auto inicio = chrono::steady_clock::now();
     mt19937 azar(semilla);
     const size_t maxPoblacion = 16;
-    const size_t hilos = max(1u, min(4u, thread::hardware_concurrency()));
+    const unsigned hilos = resolverHilos(numeroHilos, maxPoblacion);
+    EjecutorParalelo ejecutor(hilos);
     cout << "\nEvolutivo: " << maxGeneraciones << " generaciones, semilla " << semilla
          << ", hasta " << maxPoblacion << " individuos y " << hilos << " tareas simultáneas.\n";
     vector<ResultadoSteiner> poblacion{solucionInicial};
@@ -200,34 +204,34 @@ ResultadoEvolutivo ejecutarEvolutivoElitista(
             vector<ResultadoSteiner> candidatos = poblacion; // Sobreviven los padres, incluida la élite.
             vector<Firma> firmasPadres;
             for (const auto& individuo : poblacion) firmasPadres.push_back(firma(individuo));
-            for (size_t lote = 0; lote < maxPoblacion; lote += hilos) {
-                vector<future<ResultadoSteiner>> futuros;
-                vector<pair<size_t, size_t>> padres;
-                for (size_t tarea = lote; tarea < min(lote + hilos, maxPoblacion); ++tarea) {
-                    const size_t a = torneo(poblacion, azar);
-                    size_t b = a;
-                    if (tarea % 2 == 0 && poblacion.size() > 1) {
-                        b = (a + uniform_int_distribution<size_t>(1, poblacion.size() - 1)(azar)) % poblacion.size();
-                        ++resultado.crucesRealizados;
-                    }
-                    padres.emplace_back(a, b);
-                    const uint32_t semillaHijo = azar();
-                    // Cada tarea tiene su propio generador; el orden de los hilos no altera el resultado.
-                    futuros.push_back(async(launch::async, [&, a, b, semillaHijo]() {
-                        mt19937 azarHijo(semillaHijo);
-                        return descendiente(grafo, conexiones, poblacion[a],
-                                            a == b ? nullptr : &poblacion[b], azarHijo);
-                    }));
+            vector<pair<size_t, size_t>> padres;
+            vector<uint32_t> semillas;
+            for (size_t tarea = 0; tarea < maxPoblacion; ++tarea) {
+                const size_t a = torneo(poblacion, azar);
+                size_t b = a;
+                if (tarea % 2 == 0 && poblacion.size() > 1) {
+                    b = (a + uniform_int_distribution<size_t>(1, poblacion.size() - 1)(azar)) % poblacion.size();
+                    ++resultado.crucesRealizados;
                 }
-                for (size_t i = 0; i < futuros.size(); ++i) {
-                    auto hijo = futuros[i].get();
-                    ++estado.evaluadas;
-                    if (!validarSteiner(grafo, hijo)) throw runtime_error("Descendiente inválido.");
-                    const auto identidad = firma(hijo);
-                    const auto [a, b] = padres[i];
-                    if (identidad != firmasPadres[a] && identidad != firmasPadres[b]) ++estado.diferentes;
-                    candidatos.push_back(move(hijo));
-                }
+                padres.emplace_back(a, b);
+                semillas.push_back(azar());
+            }
+            vector<optional<ResultadoSteiner>> hijos(maxPoblacion);
+            vector<Firma> firmasHijos(maxPoblacion);
+            ejecutor.ejecutar(maxPoblacion, [&](size_t i) {
+                const auto [a, b] = padres[i];
+                mt19937 azarHijo(semillas[i]);
+                hijos[i] = descendiente(grafo, conexiones, poblacion[a],
+                                       a == b ? nullptr : &poblacion[b], azarHijo);
+                if (!validarSteiner(grafo, *hijos[i])) throw runtime_error("Descendiente inválido.");
+                firmasHijos[i] = firma(*hijos[i]);
+            });
+            // Consumir en orden conserva las mismas decisiones para cualquier número de hilos.
+            for (size_t i = 0; i < hijos.size(); ++i) {
+                ++estado.evaluadas;
+                const auto [a, b] = padres[i];
+                if (firmasHijos[i] != firmasPadres[a] && firmasHijos[i] != firmasPadres[b]) ++estado.diferentes;
+                candidatos.push_back(move(*hijos[i]));
             }
             // Nuevos inicios permiten explorar nodos ausentes en toda la población.
             if (generacion % 10 == 0) {
@@ -237,6 +241,17 @@ ResultadoEvolutivo ejecutarEvolutivoElitista(
                 ++estado.evaluadas;
                 if (!validarSteiner(grafo, inmigrante)) throw runtime_error("Inmigrante inválido.");
                 candidatos.push_back(move(inmigrante));
+            }
+            // Intensificar el mejor candidato cada 50 generaciones; una pasada
+            // limita el costo adicional y conserva la élite original.
+            if ((generacion + 1) % 50 == 0) {
+                const auto elite = min_element(candidatos.begin(), candidatos.end(),
+                    [](const auto& a, const auto& b) { return a.costo < b.costo; });
+                auto intercambio = mejorarIntercambioCaminos(grafo, *elite, 1, hilos);
+                if (intercambio.mejorasAceptadas > 0) {
+                    candidatos.push_back(move(intercambio.solucion));
+                    ++estado.evaluadas;
+                }
             }
             // Aleatorizar empates impide favorecer siempre a los padres de igual costo.
             shuffle(candidatos.begin(), candidatos.end(), azar);

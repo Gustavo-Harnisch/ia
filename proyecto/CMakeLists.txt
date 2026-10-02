@@ -18,7 +18,10 @@ add_executable(proyecto
     src/Steiner.cpp
     src/Heuristica.cpp
     src/BusquedaLocal.cpp
+    src/IntercambioCaminos.cpp
+    src/Paralelismo.cpp
     src/Evolutivo.cpp
+    src/RecocidoSimuladoSteiner.cpp
 )
 target_link_libraries(proyecto PRIVATE Threads::Threads)
 target_compile_definitions(proyecto PRIVATE

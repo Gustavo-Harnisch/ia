@@ -9,6 +9,12 @@ struct Arista {
     int costo;
 };
 
+struct ConexionGrafo {
+    int origen;
+    int destino;
+    int costo;
+};
+
 // El .h declara qué operaciones ofrece la clase; el .cpp las implementa.
 class Grafo {
 public:
@@ -20,11 +26,14 @@ public:
     int cantidadNodos() const;
     const std::vector<Arista>& vecinos(int nodo) const;
     const std::vector<int>& terminales() const;
+    // Una entrada por conexión, en el orden en que se leyó/agregó.
+    const std::vector<ConexionGrafo>& conexiones() const;
 
 private:
     // Cada posición guarda las conexiones de un nodo.
     std::vector<std::vector<Arista>> adyacencia_;
     std::vector<int> terminales_;
+    std::vector<ConexionGrafo> conexiones_;
 
     void validarNodo(int nodo) const;
 };
