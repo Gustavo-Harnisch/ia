@@ -5,6 +5,9 @@
 #include <string>
 #include <chrono>
 #include <fstream>
+#include <iomanip>
+#include <random>
+#include <cmath>
 
 #include "Grafo.h"
 #include "Lectura.h"
@@ -15,14 +18,75 @@
 #include "IntercambioCaminos.h"
 #include "Evolutivo.h"
 #include "Grafica.h"
+#include "RecocidoSimuladoSteiner.h"
 
 
 using namespace std;
 
+namespace {
+int ejecutarModoRecocido(int argc, char* argv[]) {
+    if (argc > 5)
+        throw invalid_argument("Uso: proyecto --recocido-tiempo|--recocido-bloques [archivo] [segundos] [semilla]");
+    const bool bloques = string(argv[1]) == "--recocido-bloques";
+    const filesystem::path archivo = argc > 2 ? filesystem::path(argv[2])
+        : filesystem::path(PROYECTO_DIR) / "datos/e18.stp";
+    double segundos = 600;
+    if (argc > 3) {
+        size_t leidos = 0;
+        segundos = stod(argv[3], &leidos);
+        if (leidos != string(argv[3]).size() || !isfinite(segundos) || segundos < 0)
+            throw invalid_argument("Los segundos deben ser un número finito no negativo.");
+    }
+    // principal.py no fija semilla; secundario.py utiliza 1.
+    uint32_t semilla = bloques ? 1 : random_device{}();
+    if (argc > 4) {
+        const string texto = argv[4];
+        if (texto.empty() || texto.find_first_not_of("0123456789") != string::npos)
+            throw invalid_argument("La semilla debe ser un entero no negativo.");
+        const auto valor = stoull(texto);
+        if (valor > numeric_limits<uint32_t>::max()) throw invalid_argument("Semilla fuera de rango.");
+        semilla = static_cast<uint32_t>(valor);
+    }
+    const Grafo grafo = leerGrafo(archivo);
+    cout << "Recocido simulado sobre nodos de Steiner "
+         << (bloques ? "por bloques (secundario.py)" : "por tiempo (principal.py)") << '\n'
+         << "Archivo: " << archivo << '\n'
+         << "Nodos: " << grafo.cantidadNodos() << '\n'
+         << "Aristas: " << grafo.conexiones().size() << '\n'
+         << "Terminales: " << grafo.terminales().size() << '\n'
+         << "Semilla: " << semilla << " | Límite del recocido: " << segundos << " s\n"
+         << "Generando solución inicial (30 inicios aleatorios)..." << endl;
+    const auto resultado = ejecutarRecocidoSimuladoSteiner(grafo,
+        bloques ? VarianteRecocido::PorBloques : VarianteRecocido::PorTiempo,
+        segundos, semilla, [](const ProgresoRecocido& progreso) {
+            cout << "Iteraciones: " << progreso.iteraciones << " | Bloques: " << progreso.bloques
+                 << " | Mejor costo: " << progreso.mejorCosto
+                 << " | Tiempo: " << progreso.segundos << " s" << endl;
+        });
+    cout << "Costo MST base: " << resultado.costoMST << '\n'
+         << "Costo MST podado: " << resultado.costoMSTPodado << '\n'
+         << "Costo solución inicial: " << resultado.costoInicial << '\n'
+         << "Costo final recocido simulado Steiner: " << resultado.solucion.costo << '\n'
+         << "Solución válida (conexa, árbol y todos los terminales): " << (resultado.valida ? "Sí" : "No") << '\n'
+         << "Iteraciones: " << resultado.iteraciones << " | Bloques: " << resultado.bloques << '\n'
+         << "Tiempo recocido: " << resultado.tiempoSegundos << " s\n";
+    const auto reduccion = [&](const char* etiqueta, long long base) {
+        cout << etiqueta;
+        if (base == 0) cout << "No aplica (costo base cero)\n";
+        else cout << fixed << setprecision(2)
+                  << 100.0 * (base - resultado.solucion.costo) / base << " %\n";
+    };
+    reduccion("Reducción respecto al MST base: ", resultado.costoMST);
+    reduccion("Reducción respecto al MST podado: ", resultado.costoMSTPodado);
+    return resultado.valida ? 0 : 1;
+}
+}
 
 int main(int argc, char* argv[])
 try
 {
+    if (argc > 1 && (string(argv[1]) == "--recocido-tiempo" || string(argv[1]) == "--recocido-bloques"))
+        return ejecutarModoRecocido(argc, argv);
 
     if (argc > 5) throw invalid_argument("Uso: proyecto [archivo] [generaciones] [semilla] [hilos]");
     auto numero = [](const string& texto, unsigned long long maximo) {

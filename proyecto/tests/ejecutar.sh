@@ -9,3 +9,9 @@ g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -pthread \
     "$proyecto_dir/src/"{Grafo,MST,Steiner,Heuristica,Evolutivo,Paralelismo,IntercambioCaminos,BusquedaLocal}.cpp \
     -o "$pruebas_dir/evolutivo_test"
 "$pruebas_dir/evolutivo_test"
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I"$proyecto_dir/src" "$proyecto_dir/tests/recocido_test.cpp" \
+    "$proyecto_dir/src/"{Grafo,MST,Steiner,RecocidoSimuladoSteiner}.cpp \
+    -o "$pruebas_dir/recocido_test"
+"$pruebas_dir/recocido_test"

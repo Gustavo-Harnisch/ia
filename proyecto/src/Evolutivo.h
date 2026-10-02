@@ -64,14 +64,14 @@ struct EstadoEvolutivo
 
 // Notifica la solución inicial (generación 0) y cada mejora estricta.
 using ObservadorMejora = std::function<void(const ResultadoSteiner&, int)>;
-inline constexpr int GENERACIONES_PREDETERMINADAS = 1000000;
+inline constexpr int GENERACIONES_PREDETERMINADAS = 10000;
 
 // Ejecuta el algoritmo evolutivo elitista
 ResultadoEvolutivo ejecutarEvolutivoElitista(
     const Grafo& grafo,
     const ResultadoSteiner& solucionInicial,
     int maxGeneraciones = GENERACIONES_PREDETERMINADAS,
-    std::uint32_t semilla = 42,
+    std::uint32_t semilla = 100,
     const ObservadorMejora& alMejorar = {},
     unsigned numeroHilos = 0 // 0: automático; 1: secuencial.
 );
